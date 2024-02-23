@@ -1,0 +1,17 @@
+body {
+    background-color: bisque;
+}
+
+.container {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    background-color: aqua;
+}
+
+.title {
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    font-size: 2rem;
+    font-family: 600;
+    text-align: center;
+}
