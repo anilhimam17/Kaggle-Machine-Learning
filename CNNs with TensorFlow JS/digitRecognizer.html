@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digit Recognizer</title>
+</head>
+
+<!-- Link to the Stylesheet -->
+<link rel="stylesheet" href="style.css">
+
+<!-- Link to the Javascript API -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+
+<!-- Link to utilise TensorFlow JS Visualisation -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis"></script>
+
+<script>
+
+    // Managing the Data needed for training the model
+    const IMAGE_SIZE = 784;
+    const NUM_CLASSES = 10;
+    const NUM_DATASET_ELEMENTS = 65000;
+
+    // 83% (approx) Training Data and 17% (approx) Testing Data
+    const TRAIN_TEST_RATIO = 5 / 6;
+
+    // Calculating the Training Elements and Testing Elements
+    const NUM_TRAIN_ELEMENTS = Math.floor(TRAIN_TEST_RATIO * NUM_DATASET_ELEMENTS);
+    const NUM_TEST_ELEMENTS = NUM_DATASET_ELEMENTS - NUM_TRAIN_ELEMENTS;
+
+    // Paths to the Sprite Image of MNIST and Labels
+    const MNIST_IMAGES_SPRITE_PATH = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png';
+    const MNIST_LABELS_PATH = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8';
+
+    // Loading the Images by reading the Sprite Image
+    async function load() {
+
+        // Loading the Images
+
+        /*
+        Creating a Image Object to store the Sprite Sheet
+        Creating a Canvas Object to store the Images created after accessing the training samples from the Sprite Sheet
+        */
+        const image = new Image();
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+
+        image.src = MNIST_IMAGES_SPRITE_PATH;
+        image.onload = () => {
+
+            image.width = image.naturalWidth;
+            image.height = image.naturalHeight;
+
+            /* 
+            Creating a Buffer to Store all the Bytes of the Image 
+                - A PNG Image requires 4 Bytes per pixel in storage.
+            */
+            const datasetBytesBuffer = new ArrayBuffer(NUM_DATASET_ELEMENTS * IMAGE_SIZE * 4);
+
+            // Batching the Images together in smaller parts
+            const chunkSize = 5000;
+            canvas.width = image.width;
+            canvas.height = chunkSize;
+
+            // Reading the Sprite Sheet Byte by Byte for each chunk and storing it as an image on the Canvas
+            for (var i = 0; i < NUM_DATASET_ELEMENTS / chunkSize; i++) {
+                
+                // Creating the Byte Array to Store the Image Information in the Buffer
+                const datasetBytesView = new Float32Array(
+                    datasetBytesBuffer, i * IMAGE_SIZE * chunkSize * 4, IMAGE_SIZE * chunkSize
+                );
+
+                // Drawing the Image to be stored in the Buffer on Canvas
+                context.drawImage(
+                    image, 0, i * chunkSize, image.width, chunkSize, 0, 0, image.width, chunkSize
+                );
+
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+
+                // Reading the Data
+                for (var j = 0; j < imageData.data.length / 4; j++) {
+                    datasetBytesView[j] = imageData.data[j * 4] / 255;
+                }
+            }
+
+            // New Array for New Chunk being read
+            datasetImages = new Float32Array(datasetBytesBuffer);
+            resolve();
+        }
+
+        // ------------------------------------------------------------------
+
+        // Loading the Labels corresponding to the Image
+        const labelsRequest = fetch(MNIST_LABELS_PATH);
+        const [imageResponse, labelsResponse] = await Promise.all([imageRequest, labelsRequest]);
+        
+        // Populating the Loaded Labels into an Array Buffer
+        datasetLabels = new Uint8Array(await labelsResponse.ArrayBuffer());
+
+        // Shuffled Indices
+        trainIndices = tf.util.createShuffledIndices(NUM_TRAIN_ELEMENTS);
+        testIndices = tf.util.createShuffledIndices(NUM_TEST_ELEMENTS);
+
+        // Splitting into Training and Test Sets
+        trainImages = datasetImages.slice(0, IMAGE_SIZE * NUM_TRAIN_ELEMENTS);
+        testImages = datasetImages.slice(IMAGE_SIZE * NUM_TRAIN_ELEMENTS);
+        trainLabels = datasetLabel.slice(0, NUM_CLASSES * NUM_TRAIN_ELEMENTS);
+        testLabels = datasetLabel.slice(NUM_CLASSES * NUM_TRAIN_ELEMENTS);
+    }
+
+    // ------------------------------------------------------------------
+
+    // Batching the Data required for Training
+    function nextBatch(batchSize, data, index) {
+        const batchImagesArray = new Float32Array(batchSize * IMAGE_SIZE);
+        const batchLabelsArray = new Uint8Array(batchSize * NUM_CLASSES);
+
+        // Populating the Array with Batches
+        for (var i = 0; i < batchSize; i++) {
+            const idx = index();
+
+            const image = data[0].slice(idx * IMAGE_SIZE, idx * IMAGE_SIZE + IMAGE_SIZE);
+            batchImagesArray.set(image, i * IMAGE_SIZE);
+
+            const label = data[1].slice(idx * NUM_CLASSES, idx * NUM_CLASSES + NUM_CLASSES);
+            batchLabelsArray.set(label, i * NUM_CLASSES);
+        }
+
+        // Converting the Arrays to tensor2d
+        const xs = tf.tensor2d(batchImagesArray, [batchSize, IMAGE_SIZE]);
+        const labels = tf.tensor2d(batchLabelsArray, [batchSize, NUM_CLASSES]);
+
+        return {xs, labels};
+    }
+
+    function nextTrainBatch() {
+        return nextBatch(
+            batchSize, [trainImages, trainLabels], () => {
+                shuffledTrainIndex = (shuffledTrainIndex + 1) % trainIndices.length;
+                return trainIndices[shuffledTrainIndex];
+            }
+        );
+    }
+
+    function nextTestBatch(batchSize) {
+        return nextBatch(
+            batchSize, [testImages, testLabels], () => {
+                shuffledTestIndex = (shuffledTestIndex + 1) % testIndices.length;
+                return testIndices[shuffledTestIndex];
+            }
+        );
+    }
+    
+
+    // ------------------------------------------------------------------
+
+    // Building the Model this
+    async function getModel() {
+        // Declaring the Model to add Layers
+        model = tf.sequential();
+
+        // Convolution and Pooling Layers
+        model.add(tf.layers.conv2d({
+            input_shape: [28, 28, 1], kernelSize: 3, filters:8, activation: "relu"
+        }));
+        model.add(tf.layers.maxPooling2d({
+            poolSize: [2, 2]
+        }));
+
+        model.add(tf.layers.conv2d({
+            kernelSize: 3, filters: 16, activation: "relu"
+        }));
+        model.add(tf.layers.maxPooling2d({
+            poolSize: [2, 2]
+        }));
+
+        // Summary of the Model
+        model.summary();
+
+        // Compiling the Model
+        model.compile({
+            loss: "categoricalCrossentropy", metrics: ["acccuracy"], optimizer: tf.train.adam()
+        });
+
+        return model;
+    }
+
+    // ------------------------------------------------------------------
+
+    // Training the Model
+    function train(model, data) {
+            
+        const metrics = ["loss", "val_loss", "accuracy", "val_accuracy"];
+
+        /* 
+        The container variable is used to define the Data Visualisation area
+        tab: Labels the name of the Tab representing the Graphs
+
+        By default all the visualisations made using tfvis are seen in a single window through multiple tabs
+        */
+        const container = {
+            name: "Model Training", styles: {height: "640px"}, tab: "Training Progress"
+        };
+
+        // Applying the Container and Metrics to display Callbacks using the Graph
+        const modelCallbacks = tfvis.show.fitCallbacks(container, metrics);
+
+        // Parameters used while training
+        const BATCH_SIZE = 512;
+        const TRAIN_DATA_SIZE = 5500;
+        const TEST_DATA_SIZE = 1000;
+
+        const [trainXs, trainYs] = tf.tidy(() => {
+            const d = data.nextTrainBatch(TRAIN_DATA_SIZE);
+            return [
+                d.xs.reshape([TRAIN_DATA_SIZE, 28, 28, 1]),
+                d.labels
+            ];
+        });
+
+        const [testXs, testYs] = tf.tidy(() => {
+            const d = data.nextTestBatch(TEST_DATA_SIZE);
+            return [
+                d.xs.reshape([TEST_DATA_SIZE, 28, 28, 1]),
+                d.labels
+            ];
+        });
+
+        // Return the model after training
+        return model.fit(
+            trainXs, trainYs, 
+            {
+                batchSize: BATCH_SIZE,
+                validationData: [testXs, testYs],
+                epochs: 50,
+                shuffle: true,
+                callbakcs: modelCallbacks
+            }
+        );
+    }
+
+</script>
+
+<body>
+    <div class="header">
+        <h1 class="title">Digit Recognizer with TensorFlow Js</h1>
+    </div>
+</body>
+</html>
